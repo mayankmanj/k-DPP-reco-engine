@@ -84,23 +84,22 @@ def nesterov_descent(Vl, tdf, epsilon=1e-4, beta=0.95, T=1000, mbatchsize=1000, 
     Nl = len(tdf)
     Vt = Vl
     Wt = np.zeros((Ml, Kl))
+    val0 = 1
     while t < tmax:
         mbatch_tdf = np.random.choice(tdf, size=mbatchsize)
         epsilon_t = epsilon / (1 + t / T)
-        Wt = (beta * Wt) + (1 - beta) * epsilon_t * grad_ll(Vl, mbatch_tdf)
+        Wt = (beta * Wt) + (1 - beta) * epsilon_t * grad_ll(Vt + beta * Wt, mbatch_tdf)
         print(t, spl.norm(Wt))
         Vtemp = Vt
         Vt = Vt + Wt
         t += 1
         if t % 1000 == 0:
             val1 = func(Vt, tdf)
-            val0 = func(Vtemp, tdf)
             rel_error = abs((val1 - val0) / val0)
             print("Relative error = ", rel_error)
-            if val1 < val0:
-                print("nonsense")
             if rel_error < delta:
                 break
+            val0 = val1
     return Vt
 
 
@@ -141,10 +140,7 @@ training_df = df[:N]  # Training data
 test_df = df[N:]  # Testing data
 
 if not USE_SAVED_V:
-    try:
-        V = np.loadtxt("Vfile.txt")
-    except:
-        V = np.random.uniform(0, 1, (M, K))
+    V = np.random.uniform(0, 1, (M, K))
     V = nesterov_descent(V, training_df) #, t=10000, tmax=20000)
     np.savetxt("Vfile.txt", V)
 else:
