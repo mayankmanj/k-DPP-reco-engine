@@ -28,6 +28,7 @@
 # import matplotlib
 import numpy as np
 import random
+import scipy
 import scipy.linalg as spl
 
 # matplotlib.use('Qt5Agg')
@@ -37,69 +38,97 @@ USE_SAVED_V = False  # Flag to run the learning algorithm over the training data
 K = 76  # number of traits
 
 
+def grad_ll_helper(elems: np.ndarray, Vl):
+    Vn = np.array([Vl[e] for e in elems])
+    if type(Vn) == float:
+        Vn = np.array([[Vn]])
+        print("exit")
+    An = 2 * spl.solve(Vn @ Vn.T, Vn)
+    Fl = np.zeros(Vl.shape)
+    for i, e in enumerate(elems):
+        Fl[e] += An[i]
+    return Fl
+
+
+vgrad_ll_helper = np.vectorize(grad_ll_helper, excluded=[1], otypes=[np.ndarray])
+
+
 def grad_ll(Vl: np.array, tdf):  # Likelihood of the gradient function
     Ml, Kl = Vl.shape
     Nl = len(tdf)
+
     B = Vl @ spl.inv(np.eye(Kl) + (Vl.T @ Vl))  # V-V(I_k+V^tV)^{-1}V^tV
     secondTerm = 2 * Nl * B
-    elems = [list(l) for l in tdf]
-    elems = [{i: elems[n][i] for i in range(len(elems[n]))} for n in
-             range(Nl)]  # map between items and the locations in the list
-    Vn = [np.array([Vl[e] for e in elems[n]]) for n in range(Nl)]
-    An = [2 * spl.solve(Vn[n] @ Vn[n].T, Vn[n]) for n in range(Nl)]
-    firstTerm = np.zeros((Ml, Kl))
-    for n in range(Nl):
-        for i in elems[n].keys():
-            firstTerm[elems[n][i]] += An[n][i]
 
-    alpha = 1
+    firstTerm = np.sum(vgrad_ll_helper(tdf, Vl))
+
+    alpha = 0.1
     llambda = np.ones((Ml, 1))
     for shoplist in tdf:
         for i in shoplist:
             llambda[i] += 1
     llambda = 1 / llambda
-    thirdTerm = alpha * llambda * Vl  # regulaization
+    thirdTerm = alpha * llambda * Vl  # regularization
+
     gradll = firstTerm - secondTerm - thirdTerm
     return gradll
+
+def loglikelihood_helper(elems: np.ndarray, Vl):
+    Vn = np.array([Vl[e] for e in elems])
+    return np.log(spl.det((Vn @ Vn.T)))
+
+
+vloglikelihood_helper = np.vectorize(loglikelihood_helper, excluded=[1])
 
 
 def loglikelihood(Vl, tdf):
     Ml, Kl = Vl.shape
     llambda = np.ones((Ml, 1))
-    Vslist = [np.array([Vl[e] for e in slist]) for slist in tdf]
-    firstterm = np.sum([np.log(spl.det(Vslist[n] @ Vslist[n].T)) for n in range(len(Vslist))])
+
+    firstterm = np.sum(vloglikelihood_helper(tdf, Vl))
+
     for slist in tdf:
         for i in slist:
             llambda[i] += 1
     llambda = 1 / llambda
     secondTerm = len(tdf) * np.log(spl.det(np.eye(Kl) + Vl.T @ Vl))
-    alpha = 1
+    alpha = 0.1
     thirdTerm = alpha * (np.array([[spl.norm(Vl[i]) ** 2 for i in range(Ml)]]) @ llambda)[0][0] / 2
     return firstterm - secondTerm - thirdTerm
 
 
-def nesterov_descent(Vl, tdf, epsilon=1e-4, beta=0.95, T=1000, mbatchsize=1000, func=loglikelihood, delta=1e-5, t=0,
+def nesterov_descent(Vl, tdf, epsilon=1e-5, beta=0.95, T=100, mbatchsize=1000, func=loglikelihood, delta=1e-5, t=0,
                      tmax=10000):
     Ml, Kl = Vl.shape
     Nl = len(tdf)
     Vt = Vl
-    Wt = np.zeros((Ml, Kl))
+    Wt = np.float_(np.zeros((Ml, Kl)))
     val0 = 1
+    l_index = 0
+    h_index = mbatchsize
     while t < tmax:
-        mbatch_tdf = np.random.choice(tdf, size=mbatchsize)
+        if l_index >= Nl:
+            np.random.shuffle(tdf)
+            l_index = 0
+            h_index = mbatchsize
+        mbatch_tdf = tdf[l_index:h_index]
         epsilon_t = epsilon / (1 + t / T)
         Wt = (beta * Wt) + (1 - beta) * epsilon_t * grad_ll(Vt + beta * Wt, mbatch_tdf)
-        print(t, spl.norm(Wt))
-        Vtemp = Vt
-        Vt = Vt + Wt
-        t += 1
+        if t % 100 == 0:
+            print(t, spl.norm(Wt), spl.norm(Vt))
         if t % 1000 == 0:
             val1 = func(Vt, tdf)
             rel_error = abs((val1 - val0) / val0)
             print("Relative error = ", rel_error)
+            if val1 < val0:
+                print("nonsense")
             if rel_error < delta:
                 break
             val0 = val1
+        Vt = Vt + Wt
+        t += 1
+        l_index += mbatchsize
+        h_index += mbatchsize
     return Vt
 
 
@@ -111,7 +140,6 @@ def pred_func(slist: set, Vl: np.array):
     Vnotslist = np.array([Vl[e] for e in range(Ml) if e not in slist])
     Zslist = VslistT @ (spl.solve(Vslist @ VslistT, Vslist))
     Vnew = Vnotslist - (Vnotslist @ Zslist)
-    # Lnew = Vnew.dot(Vnew.T)
     Ml_new = Ml - len(slist)
     prob_l = np.array([np.dot(Vnew[i], Vnew[i]) for i in range(Ml_new)])
     prob_l = prob_l / sum(prob_l)
@@ -122,48 +150,53 @@ with open("retail.dat", "r") as file:
     lines = file.readlines()
     lines = [l.strip('\n') for l in lines]
 
-df = [{int(i) for i in l.split()} for l in lines]
+df = np.array([np.array([int(i) for i in l.split()]) for l in lines])
 items = set()
 for i in df:
-    items |= i
+    items |= set(i)
 M = len(items)
 tot_N = len(df)
 N = int(np.floor(0.7 * tot_N))
 
-for i in range(N):
-    j = randint(i, tot_N)
-    temp = df[i]
-    df[i] = df[j]  # swap
-    df[j] = temp
+# for i in range(N):
+#     j = randint(i, tot_N)
+#     temp = df[i]
+#     df[i] = df[j]  # swap
+#     df[j] = temp
 
 training_df = df[:N]  # Training data
 test_df = df[N:]  # Testing data
 
 if not USE_SAVED_V:
-    V = np.random.uniform(0, 1, (M, K))
-    V = nesterov_descent(V, training_df) #, t=10000, tmax=20000)
-    np.savetxt("Vfile.txt", V)
+    try:
+        V = np.loadtxt("Vfile7.txt")
+    except:
+        V = np.float_(np.random.uniform(-1, 1, (M, K)))
+    V = nesterov_descent(V, training_df, tmax=100000, mbatchsize=1000, epsilon=1e-4, beta=0.8, T=100)
+    np.savetxt("Vfile7.txt", V)
 else:
-    V = np.loadtxt("Vfile.txt")
+    V = np.loadtxt("Vfile7.txt")
 
 
 def discard_random_elem(slist):
-    i = random.choice(list(slist))
-    return slist.difference({i}), i
+    i = np.random.randint(len(slist))
+    return slist[i], slist.pop(i)
 
 
 # Discard a random element from each shopping list in the test data
 test_df = [discard_random_elem(slist) for slist in test_df if len(slist) > 1]
 
 MPR = 0
-for slist, val in test_df:
+iter = 0
+for val, slist in test_df:
     # if val != pred_func(slist, V):
     prob, imap = pred_func(slist, V)
     Mnew = M - len(slist)
-    #    error += 1
+    # error += 1
     MPR += sum(prob <= prob[np.where(imap == val)]) / Mnew
-    print(MPR)
+    iter += 1
+    # print(iter, MPR)
 
 MPR = MPR / len(test_df)
 
-print("Mean Percentile Ranking = ", MPR)
+print("Mean Percentile Ranking =", MPR)
