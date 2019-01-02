@@ -38,20 +38,30 @@ USE_SAVED_V = False  # Flag to run the learning algorithm over the training data
 K = 76  # number of traits
 
 
-def grad_ll_helper(elems: np.ndarray, Vl):
+class vectorized(object):
+    def __init__(self, excluded = None, otypes = None):
+        self.excluded = excluded
+        self.otypes = otypes
+
+    def __call__(self, func):
+        return np.vectorize(func, excluded=self.excluded, otypes=self.otypes)
+
+@vectorized(excluded=[1,2], otypes=[np.ndarray])
+def grad_ll_helper(elems: np.ndarray, Vl, fterm):
     Vn = np.array([Vl[e] for e in elems])
     if type(Vn) == float:
         Vn = np.array([[Vn]])
         print("exit")
     An = 2 * spl.solve(Vn @ Vn.T, Vn)
-    Fl = np.zeros(Vl.shape)
+    # Fl = np.zeros(Vl.shape)
     for i, e in enumerate(elems):
-        Fl[e] += An[i]
-    return Fl
+        fterm[e] += An[i]
 
 
-vgrad_ll_helper = np.vectorize(grad_ll_helper, excluded=[1], otypes=[np.ndarray])
-
+@vectorized(excluded=[1])
+def regularization_helper(elems, lmbda):
+    for i in elems:
+        lmbda[i] += 1
 
 def grad_ll(Vl: np.array, tdf):  # Likelihood of the gradient function
     Ml, Kl = Vl.shape
@@ -60,32 +70,35 @@ def grad_ll(Vl: np.array, tdf):  # Likelihood of the gradient function
     B = Vl @ spl.inv(np.eye(Kl) + (Vl.T @ Vl))  # V-V(I_k+V^tV)^{-1}V^tV
     secondTerm = 2 * Nl * B
 
-    firstTerm = np.sum(vgrad_ll_helper(tdf, Vl))
+    # firstTerm = np.sum(vgrad_ll_helper(tdf, Vl))
+
+    firstTerm = np.zeros(Vl.shape)
+    # for slist in tdf:
+    #     grad_ll_helper(slist, Vl, firstTerm)
+    grad_ll_helper(tdf, Vl, firstTerm)
 
     alpha = 0.1
+
     llambda = np.ones((Ml, 1))
-    for shoplist in tdf:
-        for i in shoplist:
-            llambda[i] += 1
+    regularization_helper(tdf, llambda)
+
     llambda = 1 / llambda
     thirdTerm = alpha * llambda * Vl  # regularization
 
     gradll = firstTerm - secondTerm - thirdTerm
     return gradll
 
+@vectorized(excluded=[1])
 def loglikelihood_helper(elems: np.ndarray, Vl):
     Vn = np.array([Vl[e] for e in elems])
     return np.log(spl.det((Vn @ Vn.T)))
-
-
-vloglikelihood_helper = np.vectorize(loglikelihood_helper, excluded=[1])
 
 
 def loglikelihood(Vl, tdf):
     Ml, Kl = Vl.shape
     llambda = np.ones((Ml, 1))
 
-    firstterm = np.sum(vloglikelihood_helper(tdf, Vl))
+    firstterm = np.sum(loglikelihood_helper(tdf, Vl))
 
     for slist in tdf:
         for i in slist:
@@ -97,13 +110,14 @@ def loglikelihood(Vl, tdf):
     return firstterm - secondTerm - thirdTerm
 
 
-def nesterov_descent(Vl, tdf, epsilon=1e-5, beta=0.95, T=100, mbatchsize=1000, func=loglikelihood, delta=1e-5, t=0,
+def nesterov_descent(Vl, tdf, epsilon=1e-5, beta=0.95, T=100, mbatchsize=10000, func=loglikelihood, delta=1e-5, t=0,
                      tmax=10000):
     Ml, Kl = Vl.shape
     Nl = len(tdf)
     Vt = Vl
     Wt = np.float_(np.zeros((Ml, Kl)))
     val0 = 1
+    np.random.shuffle(tdf)
     l_index = 0
     h_index = mbatchsize
     while t < tmax:
@@ -169,11 +183,11 @@ test_df = df[N:]  # Testing data
 
 if not USE_SAVED_V:
     try:
-        V = np.loadtxt("Vfile7.txt")
+        V = np.loadtxt("Vfile.txt")
     except:
         V = np.float_(np.random.uniform(-1, 1, (M, K)))
     V = nesterov_descent(V, training_df, tmax=100000, mbatchsize=1000, epsilon=1e-4, beta=0.8, T=100)
-    np.savetxt("Vfile7.txt", V)
+    np.savetxt("Vfile.txt", V)
 else:
     V = np.loadtxt("Vfile7.txt")
 
