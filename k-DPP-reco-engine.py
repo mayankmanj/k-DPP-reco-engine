@@ -189,7 +189,7 @@ if not USE_SAVED_V:
     V = nesterov_descent(V, training_df, tmax=100000, mbatchsize=1000, epsilon=1e-4, beta=0.8, T=100)
     np.savetxt("Vfile.txt", V)
 else:
-    V = np.loadtxt("Vfile7.txt")
+    V = np.loadtxt("Vfile.txt")
 
 
 def discard_random_elem(slist):
