@@ -193,8 +193,8 @@ else:
 
 
 def discard_random_elem(slist):
-    i = np.random.randint(len(slist))
-    return slist[i], slist.pop(i)
+    i = np.random.choice(slist)
+    return i, slist[slist != i]
 
 
 # Discard a random element from each shopping list in the test data
