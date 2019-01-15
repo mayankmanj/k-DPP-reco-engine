@@ -1,16 +1,18 @@
 #!/usr/bin/python3
 
-# Author: Mayank Manjrekar A program to get basket recommendation of a
-# new item based on the current list of items in the cart. the
-# learning phase of program is based on maximizing the (regulaized)
-# log-likelihood function of k-DPP ensembles over the trainin
-# dataset. DPPs ensembles provide interesting properties for dealing
-# with such problems. We use the Belgian basket dataset for training
-# in the code below. This is anonymized set of shopping lists at a
-# supermarket. To improve efficiency, we work with low rank matrices
-# of rank K, where K intuitively denotes the number of traits of an
-# item. The performance of the recommendation engine is computed in
-# terms of the Mean-Percentile-Ranking.
+# Author: Mayank Manjrekar
+
+# A program to get basket recommendation of a new item based on the
+# current list of items in the cart. the learning phase of program is
+# based on maximizing the (regulaized) log-likelihood function of
+# k-DPP ensembles over the trainin dataset. DPPs ensembles provide
+# interesting properties for dealing with such problems. We use the
+# Belgian basket dataset for training in the code below. This is
+# anonymized set of shopping lists at a supermarket. To improve
+# efficiency, we work with low rank matrices of rank K, where K
+# intuitively denotes the number of traits of an item. The performance
+# of the recommendation engine is computed in terms of the
+# Mean-Percentile-Ranking.
 
 # For details of these properties, and for analysis of the
 # computational complexity and performance of the current
@@ -21,9 +23,9 @@
 # title = ”Using Association Rules for Product Assortment Decisions: A Case Study”,
 # year = ”1999”
 
-# In the following, nesterov_descent(...) is a hand-written stochastic
-# gradient descent algorithm. grad_ll(...) computes the gradient of
-# the log-likelihood function.
+# In the following, nesterov_descent(...) is a stochastic gradient
+# descent algorithm. grad_ll(...) computes the gradient of the
+# log-likelihood function.
 
 # import matplotlib
 import numpy as np
@@ -34,7 +36,7 @@ import scipy.linalg as spl
 # matplotlib.use('Qt5Agg')
 randint = np.random.randint
 
-USE_SAVED_V = False  # Flag to run the learning algorithm over the training data
+USE_SAVED_V = True  # Flag to run the learning algorithm over the training data
 K = 76  # number of traits
 
 
@@ -67,7 +69,9 @@ def grad_ll(Vl: np.array, tdf):  # Likelihood of the gradient function
     Ml, Kl = Vl.shape
     Nl = len(tdf)
 
-    B = Vl @ spl.inv(np.eye(Kl) + (Vl.T @ Vl))  # V-V(I_k+V^tV)^{-1}V^tV
+    B = spl.solve(np.eye(Kl) + (Vl.T @ Vl), Vl.T).T  # V-V(I_k+V^tV)^{-1}V^tV
+
+
     secondTerm = 2 * Nl * B
 
     # firstTerm = np.sum(vgrad_ll_helper(tdf, Vl))
@@ -96,13 +100,12 @@ def loglikelihood_helper(elems: np.ndarray, Vl):
 
 def loglikelihood(Vl, tdf):
     Ml, Kl = Vl.shape
-    llambda = np.ones((Ml, 1))
 
     firstterm = np.sum(loglikelihood_helper(tdf, Vl))
 
-    for slist in tdf:
-        for i in slist:
-            llambda[i] += 1
+    llambda = np.ones((Ml, 1))
+    regularization_helper(tdf, llambda)
+
     llambda = 1 / llambda
     secondTerm = len(tdf) * np.log(spl.det(np.eye(Kl) + Vl.T @ Vl))
     alpha = 0.1
@@ -182,17 +185,14 @@ training_df = df[:N]  # Training data
 test_df = df[N:]  # Testing data
 
 if not USE_SAVED_V:
-    try:
-        V = np.loadtxt("Vfile.txt")
-    except:
-        V = np.float_(np.random.uniform(-1, 1, (M, K)))
-    V = nesterov_descent(V, training_df, tmax=100000, mbatchsize=1000, epsilon=1e-4, beta=0.8, T=100)
+    V = np.float_(np.random.uniform(-1, 1, (M, K)))
+    V = nesterov_descent(V, training_df, tmax=10000, mbatchsize=10000, epsilon=1e-4, beta=0.9, T=100)
     np.savetxt("Vfile.txt", V)
 else:
     V = np.loadtxt("Vfile.txt")
 
 
-def discard_random_elem(slist):
+def discard_random_elem(slist: np.ndarray):
     i = np.random.choice(slist)
     return i, slist[slist != i]
 
@@ -209,7 +209,7 @@ for val, slist in test_df:
     # error += 1
     MPR += sum(prob <= prob[np.where(imap == val)]) / Mnew
     iter += 1
-    # print(iter, MPR)
+    print(iter, MPR)
 
 MPR = MPR / len(test_df)
 
